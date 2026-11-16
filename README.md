@@ -117,6 +117,6 @@ ScanTailor; the image does). `tests/test_end_to_end.py` runs a real worker again
 
 ![deployment](docs/diagrams/deployment-scan-service.png)
 
-CI builds `ghcr.io/evilflowerscatalog/evilflowers-scan-service` (`:main`, `:sha-…`) after the tests pass against a real
+CI builds `ghcr.io/evilflowerscatalog/evilflowers-scan-service` (`:master`, `:develop`, `:sha-…`) after the tests pass against a real
 Redis. The k3s side (two Deployments, KEDA on the bulk queue, PriorityClass `digitalizer-batch`, the `/models` PVC)
 lives in evilflowers-knowledge's Ansible.

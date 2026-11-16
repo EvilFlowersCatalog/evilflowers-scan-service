@@ -7,7 +7,7 @@
 title evilflowers-scan-service on k3s (proposed, 2026-11-16)
 
 node "k3s (control)" {
-  artifact "ghcr.io/evilflowerscatalog/evilflowers-scan-service:main" as image <<proposed>>
+  artifact "ghcr.io/evilflowerscatalog/evilflowers-scan-service:develop" as image <<proposed>>
   node "Deployment scan\nKEDA 0..N, PriorityClass digitalizer-batch" as bulk <<proposed>> {
     component "celery worker\n--queues=evilflowers_scan.standalone" as wbulk <<focus>>
   }

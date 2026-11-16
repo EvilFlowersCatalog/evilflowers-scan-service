@@ -1,6 +1,7 @@
 # Scan service: test against a real Redis, build and push to GHCR.
 #
-#   push to main     → test, push :main :sha-<short>
+#   push to master   → test, push :master :sha-<short>
+#   push to develop  → test, push :develop :sha-<short>
 #   tag v*.*.*       → test, push :<version> :sha-<short>
 #   pull request     → test, build (no push)
 #   manual           → as a push of the chosen ref
@@ -13,10 +14,10 @@ name: Docker Build and Push
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master", "develop" ]
     tags: [ 'v*.*.*' ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master", "develop" ]
   workflow_dispatch:
 
 permissions:
