@@ -1,0 +1,46 @@
+@startuml sequence-scan-clean
+!include elvira.iuml
+' What: one clean job cuts each planned leaf from its frame, cleans it with ScanTailor in a private staging dir inside output_dir, renders previews and DZI, checks marks, and writes the outcome last; any error writes a failed outcome and raises so link_error fires.
+' Kind: UML sequence diagram, one evilflowers_scan.clean job (32 leaves bulk, 1 leaf interactive).
+' Source: issue evilflowers-scan-service#1 comments (2026-11-16); evilflowers-books-digitalizer studio/testing/standalone.py::scan_clean; studio/adapters/imaging/scantailor.py
+
+title evilflowers_scan.clean, one job (#1, #2, 2026-11-16)
+
+participant "orchestrator" as orch
+queue "evilflowers_scan.standalone[.interactive]" as q
+participant "clean task\n(run_task)" as task <<focus>>
+participant "ScanTailorCleaner" as cleaner
+participant "scantailor-deviant-cli" as st
+participant "artefacts" as art
+participant "decider-vision" as dv
+database "STORAGE_PATH" as storage
+
+orch -> q : kwargs (run_id, job, token, inputs, output_dir, outcome, leaves[])\nheaders digitalizer_run_id/job_id/stage/lane
+q -> task : deliver
+task -> task : validate CleanJob; bind headers to span + log lines
+task -> storage : read frames (raw-scans, read only)
+task -> cleaner : clean(leaves, output_dir, overrides)
+cleaner -> cleaner : rotate, crop (override wins, split_x), deskew;\ngroup by (color_mode, despeckle)
+loop each group
+  cleaner -> st : --layout=1 on <output_dir>/.st-*/in (resolved path, never /tmp)
+  st --> cleaner : one TIFF per leaf (count checked)
+end
+cleaner -> storage : <leaf>.tif (lossless), staging removed
+task -> storage : leaves/<leaf>.webp, dzi/<leaf>.dzi + _files/
+task -> art : marks(leaves)
+art -> art : candidates, ink density, aspect, position, dHash repeats
+opt uncertain band, judges enabled, budget left
+  art -> dv : choice: stamp, sticker, bleed_through, edge, content
+  dv --> art : Verdict (p, model@revision)
+end
+alt done
+  task -> storage : outcome.json (status done, leaves[], marks[]) last, atomic
+  task -[$accent_msg()]> orch : link: job_done({job, leaves})
+else error (ScanTailor exit, bad crop, soft time limit)
+  task -> storage : outcome.json (status failed, error)
+  task -[$accent_msg()]> orch : link_error: job_failed(task id)
+end
+
+caption A deliberate requeue (SIGTERM) writes nothing: the redelivery carries the same token. Past MAX_DELIVERIES give_up writes a failed outcome and raises.
+footer ELVIRA · FIIT STU · evilflowers-scan-service · docs/diagrams/sequence-scan-clean.puml
+@enduml

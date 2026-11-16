@@ -1,0 +1,44 @@
+@startuml component-scan-service
+!include elvira.iuml
+' What: evilflowers_scan.clean turns raw scan frames into cleaned leaves, previews, Deep Zoom pyramids and an artefact verdict per mark, writing only into the job's output_dir and the outcome file last; erase paints confirmed boxes white with the same renditions.
+' Kind: UML component diagram. Scope: the service's modules and the interfaces it uses; the orchestrator's ledger is one box.
+' Source: issues evilflowers-scan-service#1 (contract comments 2026-11-16) and #2; evilflowers-worker@e530f68 (StandaloneJob, run_task, judges); evilflowers-books-digitalizer studio/testing/standalone.py (scan_clean, scan_erase)
+
+title evilflowers-scan-service: modules and interfaces (#1, #2, 2026-11-16)
+
+component "digitalizer orchestrator\n(ledger, job_done / job_failed)" as orch
+queue "evilflowers_scan.standalone\nevilflowers_scan.standalone.interactive\n(Redis db 8)" as queues
+database "STORAGE_PATH\nraw-scans/ (read only)\n<item>_studio/jobs/<job>/ (write)" as storage
+component "decider-vision\nPOST /v1/systemone" as decider
+
+package "evilflowers_scan" <<proposed>> {
+  component "tasks\nclean, erase" as tasks
+  component "jobs\nrun_clean, run_erase, give_up" as jobs <<focus>>
+  component "contract\nCleanJob, EraseJob, CleanOutcome" as contract
+  component "cleaning\nScanTailorCleaner, cut_leaf" as cleaning
+  component "scantailor\nCLI, --layout=1" as st
+  component "docres\nappearance (optional)" as docres
+  component "renditions\nerase, WebP, DZI" as renditions
+  component "artefacts\nsignals, dHash, bands" as artefacts
+}
+
+component "evilflowers-worker\nrun_task, StandaloneJob,\nwrite_outcome, judges" as kit
+
+orch -down-> queues : send_task + link / link_error
+queues -down-> tasks : deliver (acks_late)
+tasks -right-> kit : run_task(on_capped=give_up)
+tasks -down-> jobs : run_clean / run_erase
+jobs -right-> contract : validate, outcome
+jobs -down-> cleaning : leaves, overrides
+cleaning -down-> st : staged leaves
+cleaning -down-> docres : color_grayscale groups
+jobs -down-> renditions : previews
+jobs -down-> artefacts : cleaned leaves
+artefacts -right-> kit : Panel.ask (uncertain only)
+kit -right-> decider : HTTP
+jobs -left-> storage : read frames, write output_dir,\noutcome.json last (atomic)
+kit -up-> orch : link / link_error (callback queue)
+
+caption No result backend, no database credential. Every path in a message or an outcome is relative to STORAGE_PATH and checked by the kit.\nA judge never fails the job: without decider-vision an uncertain mark is banded review.
+footer ELVIRA · FIIT STU · evilflowers-scan-service · docs/diagrams/component-scan-service.puml
+@enduml

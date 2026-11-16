@@ -1,0 +1,38 @@
+@startuml deployment-scan-service
+!include elvira.iuml
+' What: two Deployments of one image share Redis db 8 and the storage volume: a bulk worker scaled 0..N by KEDA at a low PriorityClass, and one always-on interactive replica.
+' Kind: UML deployment diagram. Everything here is proposed: the Ansible role lives in evilflowers-knowledge (issue to open).
+' Source: issue evilflowers-scan-service#1 and its comments (2026-11-16); evilflowers-knowledge Cookbooks/Deploy-a-Service (2026-11-07)
+
+title evilflowers-scan-service on k3s (proposed, 2026-11-16)
+
+node "k3s (control)" {
+  artifact "ghcr.io/evilflowerscatalog/evilflowers-scan-service:main" as image <<proposed>>
+  node "Deployment scan\nKEDA 0..N, PriorityClass digitalizer-batch" as bulk <<proposed>> {
+    component "celery worker\n--queues=evilflowers_scan.standalone" as wbulk <<focus>>
+  }
+  node "Deployment scan-interactive\nreplicas 1" as inter <<proposed>> {
+    component "celery worker\n--queues=evilflowers_scan.standalone.interactive" as winter
+  }
+  database "PVC /models\n(DocRes weights)" as models <<proposed>>
+  database "STORAGE_PATH volume\n(raw-scans, digitized)" as storage
+  component "decider-vision\nshared namespace" as dv
+  component "alloy-node :4318" as alloy
+}
+database "Redis db 8\n(digitalizer queues)" as redis <<proposed>>
+
+image ..> bulk : runs
+image ..> winter : runs
+wbulk --> redis : consume (6379)
+winter --> redis : consume (6379)
+wbulk --> storage : read frames, write output_dir
+winter --> storage : read frames, write output_dir
+wbulk --> models : read
+wbulk --> dv : HTTP /v1/systemone
+winter --> dv : HTTP /v1/systemone
+wbulk --> alloy : OTLP/HTTP
+winter --> alloy : OTLP/HTTP
+
+caption The bulk worker scales on the length of evilflowers_scan.standalone; the interactive replica stays up so one leaf comes back within seconds.
+footer ELVIRA · FIIT STU · evilflowers-scan-service · docs/diagrams/deployment-scan-service.puml
+@enduml

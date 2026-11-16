@@ -1,0 +1,120 @@
+# Scan service: test against a real Redis, build and push to GHCR.
+#
+#   push to main     → test, push :main :sha-<short>
+#   tag v*.*.*       → test, push :<version> :sha-<short>
+#   pull request     → test, build (no push)
+#   manual           → as a push of the chosen ref
+#
+# No deploy job yet: the k3s side (Deployments scan / scan-interactive, KEDA, PriorityClass digitalizer-batch, the
+# /models PVC) is an Ansible role in evilflowers-knowledge. Once it exists, copy the `deploy` job of
+# evilflowers-image-service (runs-on: elvira-k3s, checksum-pinned kubectl, rollout restart, digest check).
+
+name: Docker Build and Push
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scan-test-${{ github.ref }}
+      cancel-in-progress: true
+    # tests/test_end_to_end.py: a real worker against Redis (link / link_error, the headers). With `CI` set (GitHub
+    # sets it), a missing Redis fails the tests instead of skipping them. ScanTailor is not installed here: the cases
+    # that need the binary skip; the fake stands in for the rest.
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 15
+    env:
+      TEST_REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: |
+          uv run ruff check
+          uv run ruff format --check
+      - name: Types
+        run: uv run mypy
+      - name: Test
+        run: uv run pytest -q -rs
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scan-build-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # ScanTailor's source build is the slow layer; reuse it across runs.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # The OpenTelemetry service.version of the worker.
+          build-args: |
+            IMAGE_TAG=${{ github.ref_name }}@${{ github.sha }}
+
+      - name: Summary
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Image"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo "digest: ${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,66 @@
+[project]
+name = "evilflowers-scan-service"
+version = "0.1.0"
+description = "Celery worker of the books digitalizer: raw scan frames -> cleaned leaves, previews, Deep Zoom pyramids and artefact verdicts (standalone jobs)"
+readme = "README.md"
+authors = [{ name = "Jakub Dubec", email = "jakub.dubec@stuba.sk" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # The shared worker runtime: Celery app, StandaloneJob, outcome files, shutdown, delivery cap, observability, and
+    # the judges (HTTP clients of decider-vision). Pinned to a commit in [tool.uv.sources].
+    "evilflowers-worker[judges]",
+    "celery[redis]>=5.6,<6",
+    "numpy>=2.1",
+    # Headless: the image has no X/GL libraries.
+    "opencv-python-headless>=4.10",
+    "pillow>=11",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.7,<3",
+]
+
+[project.optional-dependencies]
+# OTLP/HTTP to the node's Alloy (the kit pins the SDK, exporter and instrumentations).
+otel = ["evilflowers-worker[otel]"]
+# Pyroscope SDK: Python frames the node's eBPF profiler cannot unwind; on only with PYROSCOPE_SERVER_ADDRESS.
+profiling = ["evilflowers-worker[profiling]"]
+
+[dependency-groups]
+# `uv sync` installs the core and this group only.
+dev = [
+    "opentelemetry-sdk==1.45.2",
+    "pytest>=8.3",
+    "ruff>=0.14",
+    "mypy>=1.13",
+]
+
+[tool.uv.sources]
+evilflowers-worker = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker", rev = "e530f68d2e3d98519008d39b30fee96f28009834" }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evilflowers_scan"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning:importlib._bootstrap"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "LOG", "G"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["evilflowers_scan"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
