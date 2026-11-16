@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from conftest import FakeScanTailor, digest, write_frame, write_page
+from conftest import RUNS, FakeScanTailor, digest, write_frame, write_page
 from evilflowers_scan import jobs
 from evilflowers_scan.contract import CleanJob, EraseJob
 from evilflowers_scan.imaging import ImageOps, ScanTailorCleaner
@@ -267,3 +267,70 @@ def test_a_redelivery_sweeps_the_staging_of_a_killed_delivery(settings, services
     (stale / "0003.tif").write_bytes(b"half a leaf")
     jobs.clean(services, clean_message())
     assert not (settings.storage_path / OUT / ".st-killed").exists()
+
+
+# -- The project's ScanTailor settings (#3) ------------------------------------------------------------------------
+
+
+@pytest.fixture
+def env_services(settings) -> jobs.Services:
+    """ScanTailor as the env builds it: dpi 300, output_dpi = dpi, mixed / cautious."""
+    return jobs.Services(settings, ScanTailorCleaner(FakeScanTailor(dpi=300, output_dpi=300)), ImageOps(), None)
+
+
+def test_without_project_settings_the_env_ones_apply(settings, env_services, frame):
+    jobs.clean(env_services, clean_message())
+    assert {leaf["dpi"] for leaf in outcome(settings)["leaves"]} == {300}
+    assert {(mode, despeckle) for mode, despeckle, _ in RUNS} == {("mixed", "cautious")}
+
+
+def test_the_project_settings_apply_to_the_whole_job(settings, env_services, frame):
+    project = {"color_mode": "color_grayscale", "despeckle": "off", "margins_mm": 5.0, "output_dpi": 600}
+    jobs.clean(env_services, clean_message(scantailor=project))
+    assert {leaf["dpi"] for leaf in outcome(settings)["leaves"]} == {600}
+    assert {(mode, despeckle) for mode, despeckle, _ in RUNS} == {("color_grayscale", "off")}
+
+
+def test_a_leaf_override_still_wins_over_the_project(settings, env_services, frame):
+    message = clean_message(scantailor={"color_mode": "color_grayscale"})
+    leaves = [leaf.model_dump() for leaf in message.leaves]
+    leaves[1]["override"] = {"color_mode": "black_and_white"}
+    jobs.clean(env_services, clean_message(scantailor={"color_mode": "color_grayscale"}, leaves=leaves))
+    assert sorted((mode, names) for mode, _, names in RUNS) == [
+        ("black_and_white", ["0004.tif"]),
+        ("color_grayscale", ["0003.tif"]),
+    ]
+
+
+def test_a_project_dpi_alone_also_sets_the_output_dpi(settings, env_services, frame):
+    jobs.clean(env_services, clean_message(scantailor={"dpi": 400}))
+    assert {leaf["dpi"] for leaf in outcome(settings)["leaves"]} == {400}
+
+
+def test_the_message_never_picks_the_binary_and_ignores_unknown_keys():
+    options = clean_message(scantailor={"binary": "/bin/sh", "split": True, "output_dpi": 600}).scantailor
+    assert options is not None
+    assert options.changes(None) == {"output_dpi": 600}
+
+
+@pytest.mark.parametrize("bad", [{"color_mode": "sepia"}, {"despeckle": "max"}, {"output_dpi": 10}])
+def test_invalid_project_settings_do_not_validate(bad):
+    with pytest.raises(ValidationError):
+        clean_message(scantailor=bad)
+
+
+# -- A judge misconfiguration never fails the clean (#3) -----------------------------------------------------------
+
+
+class _BrokenJudges:
+    def panel(self):
+        raise ValueError("DECIDER_VISION_URL is not a URL")
+
+
+def test_a_failing_judge_panel_is_a_warning_not_a_failed_job(settings, services, frame):
+    broken = jobs.Services(settings, services.cleaner, services.ops, _BrokenJudges())  # type: ignore[arg-type]
+    jobs.clean(broken, clean_message())
+    data = outcome(settings)
+    assert data["status"] == "done"
+    expected = "artefact check failed: ValueError: DECIDER_VISION_URL is not a URL"
+    assert all(expected in leaf["warnings"] for leaf in data["leaves"])

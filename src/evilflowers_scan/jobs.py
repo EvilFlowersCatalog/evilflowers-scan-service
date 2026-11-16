@@ -119,8 +119,9 @@ def _marks(
     if not services.settings.artefacts_enabled:
         return {}, None
     sides = {leaf.leaf: leaf.side for leaf in message.leaves}
-    panel = services.judges.panel() if services.judges is not None else None
     try:
+        # Inside the guard: a judge misconfiguration (a bad URL, thresholds) must not fail the clean (#3).
+        panel = services.judges.panel() if services.judges is not None else None
         found = artefacts.marks(
             [artefacts.LeafImage(page.leaf, page.image, sides.get(page.leaf)) for page in pages],
             artefacts.from_settings(services.settings),
@@ -158,7 +159,9 @@ def clean(services: Services, message: CleanJob, kind: str = "clean") -> dict[st
             )
             for leaf, frame in zip(message.leaves, frames, strict=True)
         ]
-        pages = services.cleaner.clean(plans, directory)
+        options = message.scantailor.changes(settings.output_dpi) if message.scantailor else {}
+        cleaner = services.cleaner.with_options(options)
+        pages = cleaner.clean(plans, directory)
         found, marks_warning = _marks(services, message, pages)
         rotations = {leaf.leaf: leaf.rotate_degree for leaf in message.leaves}
         leaves = []

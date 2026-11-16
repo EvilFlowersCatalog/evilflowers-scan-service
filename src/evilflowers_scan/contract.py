@@ -58,10 +58,34 @@ class CleanLeaf(_Row):
         return value
 
 
+class ScanTailorOptions(_Row):
+    """The project's ScanTailor settings (``[projects.X.pipeline.scantailor]``, #3), keyed as the digitalizer's
+    ``ScanTailorCleaner.from_settings``. Every key is optional: a missing one keeps the worker's env value. Unknown
+    keys (``split``) and ``binary`` are ignored: a message never picks the executable."""
+
+    color_mode: Literal["mixed", "color_grayscale", "black_and_white"] | None = None
+    despeckle: Literal["off", "cautious", "normal", "aggressive"] | None = None
+    margins_mm: float | None = Field(None, ge=0)
+    dewarping: Literal["off", "auto", "marginal"] | None = None
+    normalize_illumination: bool | None = None
+    dpi: int | None = Field(None, ge=50)
+    output_dpi: int | None = Field(None, ge=50)
+
+    def changes(self, env_output_dpi: int | None) -> dict[str, Any]:
+        """The ``ScanTailor`` fields this job changes. ``output_dpi`` defaults to ``dpi`` as in the digitalizer:
+        a message ``dpi`` without ``output_dpi`` sets both, unless the env pins ``OUTPUT_DPI``."""
+        changes = self.model_dump(exclude_none=True)
+        if self.output_dpi is None and self.dpi is not None and env_output_dpi is None:
+            changes["output_dpi"] = self.dpi
+        return changes
+
+
 class CleanJob(StandaloneJob):
     """``evilflowers_scan.clean``: up to 32 leaves (bulk) or one (interactive)."""
 
     leaves: list[CleanLeaf] = Field(min_length=1)
+    #: The project's ScanTailor settings for the whole job (#3); a leaf's ``override`` still wins.
+    scantailor: ScanTailorOptions | None = None
     #: The project lets ``hide``-band marks be painted white on the cleaned leaf (#2). Off: nothing is erased.
     erase_hidden: bool = False
 

@@ -22,8 +22,14 @@ Message (keyword arguments, every path relative to `STORAGE_PATH`):
  "outcome": "digitized/<item>/<item>_studio/jobs/17-a1/outcome.json",
  "leaves": [{"leaf": 3, "frame": "raw-scans/fei/<book>/0002.tif", "side": 1, "crop_box": [x, y, w, h],
              "rotate_degree": 0, "hand_side": "RIGHT", "override": {}}],
+ "scantailor": {"color_mode": "mixed", "margins_mm": 8.0, "dpi": 300, "output_dpi": 600},
  "erase_hidden": false}
 ```
+
+`scantailor` (optional) is the project's `[projects.X.pipeline.scantailor]`, applied to the whole job; a missing key
+keeps the env value (`COLOR_MODE`, `OUTPUT_DPI`, …), `binary` and unknown keys are ignored, and a leaf's `override`
+still wins. `erase_hidden` stays `false`: the orchestrator removes pixels only through `evilflowers_scan.erase`, after an
+operator confirms.
 
 What lands in `output_dir`:
 

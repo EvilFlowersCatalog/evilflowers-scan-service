@@ -15,9 +15,10 @@ from __future__ import annotations
 import logging
 import shutil
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -137,6 +138,13 @@ class ScanTailorCleaner:
         self.scantailor = scantailor
         self.docres = docres
         self.docres_modes = frozenset(docres_modes)
+
+    def with_options(self, changes: Mapping[str, Any]) -> ScanTailorCleaner:
+        """This cleaner with the job's ScanTailor settings (the project's, #3); itself when there are none."""
+        if not changes:
+            return self
+        return ScanTailorCleaner(replace(self.scantailor, **changes), docres=self.docres,
+                                 docres_modes=tuple(self.docres_modes))  # fmt: skip
 
     def tool(self, color_mode: str, despeckle: str) -> ScanTailor:
         """The ScanTailor run of one group (the override's flags)."""
